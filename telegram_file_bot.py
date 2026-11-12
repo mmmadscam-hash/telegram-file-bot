@@ -5,6 +5,8 @@
 import logging
 import os
 import sqlite3
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 from telegram import (
@@ -276,6 +278,30 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("عملیات لغو شد.")
 
 
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path in ("/", "/health"):
+            body = b"Telegram bot process is running"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, format, *args):
+        return
+
+
+def start_health_server():
+    port = int(os.environ.get("PORT", "10000"))
+    server = HTTPServer(("0.0.0.0", port), HealthHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    log.info("Health server listening on port %s", port)
+
+
 def main():
     if BOT_TOKEN == "PASTE_BOT_TOKEN_HERE" or not BOT_TOKEN.strip():
         raise SystemExit("ابتدا BOT_TOKEN را در ابتدای فایل وارد کن.")
@@ -284,6 +310,7 @@ def main():
     if any("your_channel" in ch for ch in REQUIRED_CHANNELS):
         raise SystemExit("نام هر ۳ کانال را در تنظیمات فایل وارد کن.")
     init_db()
+    start_health_server()
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("admin", admin))
