@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+# Telegram file bot for Termux
+# Python 3.10+ | python-telegram-bot 21.x
+
+import logging
+import os
+import sqlite3
+from pathlib import Path
+
+from telegram import (
+    Update, InlineKeyboardButton, InlineKeyboardMarkup,
+)
+from telegram.ext import (
+    Application, CommandHandler, CallbackQueryHandler,
+    MessageHandler, ContextTypes, filters,
+)
+
+# ========== CONFIG: EDIT THESE VALUES ==========
+BOT_TOKEN = "PASTE_BOT_TOKEN_HERE"
+ADMIN_IDS = {123456789}  # Replace with your numeric Telegram user ID
+REQUIRED_CHANNELS = [
+    "@your_channel_1",
+    "@your_channel_2",
+    "@your_channel_3",
+]
+# Optional: public channel links shown in the join screen.
+CHANNEL_LINKS = [
+    "https://t.me/your_channel_1",
+    "https://t.me/your_channel_2",
+    "https://t.me/your_channel_3",
+]
+# ===============================================
+
+DB_PATH = Path(__file__).with_name("bot_data.sqlite3")
+CATEGORIES = {
+    "movies": "🎬 فیلم و سریال",
+    "music": "🎵 موسیقی",
+    "books": "📚 کتاب",
+    "other": "📦 سایر فایل‌ها",
+}
+
+logging.basicConfig(
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    level=logging.INFO,
+)
+log = logging.getLogger("filebot")
+
+
+def db():
+    return sqlite3.connect(DB_PATH)
+
+
+def init_db():
+    with db() as con:
+        con.execute("""CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY, username TEXT, first_name TEXT,
+            joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
+        con.execute("""CREATE TABLE IF NOT EXISTS files (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, category TEXT NOT NULL,
+            file_id TEXT NOT NULL, file_type TEXT NOT NULL, caption TEXT,
+            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
+
+
+def is_admin(user_id: int) -> bool:
+    return user_id in ADMIN_IDS
+
+
+async def check_membership(context: ContextTypes.DEFAULT_TYPE, user_id: int):
+    missing = []
+    for channel in REQUIRED_CHANNELS:
+        try:
+            member = await context.bot.get_chat_member(channel, user_id)
+            if member.status not in ("member", "administrator", "creator"):
+                missing.append(channel)
+        except Exception:
+            # The bot must be an administrator in each channel to verify membership.
+            log.exception("Could not check membership for %s", channel)
+            missing.append(channel)
+    return missing
+
+
+def join_keyboard():
+    rows = []
+    for i, link in enumerate(CHANNEL_LINKS, start=1):
+        rows.append([InlineKeyboardButton(f"عضویت در کانال {i}", url=link)])
+    rows.append([InlineKeyboardButton("✅ بررسی عضویت", callback_data="check_join")])
+    return InlineKeyboardMarkup(rows)
+
+
+async def send_join_prompt(update_or_query, context):
+    text = "برای استفاده از ربات، ابتدا در هر ۳ کانال عضو شو و سپس «بررسی عضویت» را بزن."
+    if hasattr(update_or_query, "message") and update_or_query.message:
+        await update_or_query.message.reply_text(text, reply_markup=join_keyboard())
+    else:
+        await update_or_query.edit_message_text(text, reply_markup=join_keyboard())
